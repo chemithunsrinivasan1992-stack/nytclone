@@ -1,0 +1,36 @@
+/* Center the navbar links */
+.navbar-nav {
+  width: 100%;
+  text-align: center;
+}
+.navbar-nav > li {
+  float: none;
+  display: inline-block;
+}
+
+/* Authentic Newspaper Borders */
+.thumbnail {
+  padding: 0;
+  border-radius: 0;
+}
+
+h1 {
+  border-bottom: 4px double #000;
+  display: inline-block;
+  padding: 10px 50px;
+}
+.section-header {
+  font-family: 'Georgia', serif;
+  font-weight: bold;
+  text-transform: uppercase;
+  font-size: 14px;
+  border-top: 1px solid #000;
+  border-bottom: 1px solid #000;
+  padding: 5px 0;
+  margin-bottom: 20px;
+}
+
+/* Remove default Bootstrap list styling for sidebar */
+.list-group-item:first-child, .list-group-item:last-child {
+  border-radius: 0;
+}
