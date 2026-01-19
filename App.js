@@ -1,155 +1,196 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 
-// 1. NewsCard Component (Defined safely outside)
-const NewsCard = ({ article }) => {
+/**
+ * 1. NewsCard Component
+ * Handles data from both Search and Top Stories APIs
+ */
+const NewsCard = React.forwardRef(({ article }, ref) => {
   if (!article) return null;
 
-  // Logic to fix image paths (absolute vs relative)
   const getImageUrl = (art) => {
     if (!art.multimedia || art.multimedia.length === 0) {
-      return "https://via.placeholder.com/400x250?text=No+Image+Available";
+      return "https://via.placeholder.com/600x400?text=No+Image+Available";
     }
     const media = art.multimedia[0].url;
+    // Search API uses relative paths, Top Stories uses absolute
     return media.startsWith("http") ? media : `https://www.nytimes.com/${media}`;
   };
 
   return (
-    <div className="col-md-6" style={{ marginBottom: '20px' }}>
-      <div className="thumbnail" style={{ border: 'none', borderBottom: '1px solid #eee', paddingBottom: '15px' }}>
-        <img src={getImageUrl(article)} className="img-responsive" alt={article.title}
-          style={{ height: '200px', width: '100%', objectFit: 'cover' }} />
-        <div className="caption" style={{ padding: '10px 0' }}>
-          <h4 style={{ fontFamily: 'Georgia', fontWeight: 'bold' }}>{article.title}</h4>
-          <p className="small text-muted">{article.abstract?.substring(0, 100)}...</p>
-          <a href={article.url} target="_blank" rel="noreferrer" className="btn btn-xs btn-default">Read More</a>
+    <div className="col-md-6" style={{ marginBottom: '30px' }} ref={ref}>
+      <div className="thumbnail" style={{ border: 'none', borderBottom: '1px solid #ddd', paddingBottom: '20px', borderRadius: '0' }}>
+        <img 
+          src={getImageUrl(article)} 
+          className="img-responsive" 
+          alt={article.title}
+          style={{ height: '250px', width: '100%', objectFit: 'cover' }} 
+        />
+        <div className="caption" style={{ padding: '15px 0' }}>
+          <h4 style={{ fontFamily: 'Georgia, serif', fontWeight: 'bold', minHeight: '50px' }}>
+            {article.title}
+          </h4>
+          <p className="small text-muted" style={{ lineHeight: '1.6' }}>
+            {article.abstract?.substring(0, 150)}...
+          </p>
+          <a href={article.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-default">
+            Read Full Article
+          </a>
         </div>
       </div>
     </div>
   );
-};
+});
 
 function App() {
-  const NYTDebugger = () => {
-    const [status, setStatus] = React.useState("Testing...");
-    const KEY = process.env.REACT_APP_NYT_API_KEY;
-
-    React.useEffect(() => {
-      if (!KEY) {
-        setStatus("❌ ERROR: Your .env variable is NOT being read. Check your variable name or restart your terminal.");
-        return;
-      }
-
-      fetch(`https://api.nytimes.com/svc/topstories/v2/home.json?api-key=${KEY}`)
-        .then(res => {
-          if (res.status === 200) setStatus("✅ SUCCESS: Your key is working perfectly!");
-          if (res.status === 401) setStatus("❌ 401 ERROR: The key exists but NYT rejected it. Check if 'Top Stories' API is enabled in your NYT Dashboard.");
-          if (res.status === 429) setStatus("⚠️ 429 ERROR: Rate limited. Wait 60 seconds.");
-        })
-        .catch(err => setStatus("❌ NETWORK ERROR: Check your internet connection."));
-    }, [KEY]);
-
-    return (
-      <div style={{ padding: '15px', background: '#333', color: '#fff', textAlign: 'center', fontSize: '14px' }}>
-        <strong>NYT Debugger:</strong> {status} <br />
-        <small>Key being sent: {KEY ? `${KEY.substring(0, 5)}...` : "NONE"}</small>
-      </div>
-    );
-  };
+  // Constants
+  const KEY = "AbpjN7QUYO6RvE7f7EVK5MoqUc7JMu8HOgld7CGXjYU2DZOK";
+  
+  // State
   const [articles, setArticles] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-const KEY = "AbpjN7QUYO6RvE7f7EVK5MoqUc7JMu8HOgld7CGXjYU2DZOK";
-  //const API_KEY = process.env.REACT_APP_NYT_API_KEY;
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [category, setCategory] = useState('home');
 
-  // Function to fetch Top Stories (Home, Sports, Politics)
-  const fetchNews = async (category = 'home') => {
-    setLoading(true);
-    try {
-      // Correct way to use the variable
-      //const url = `https://api.nytimes.com/svc/topstories/v2/home.json?api-key=${process.env.REACT_APP_NYT_API_KEY}`;
-      const url = `https://api.nytimes.com/svc/topstories/v2/home.json?api-key=${KEY}`;
-      const res = await fetch(url);
-      const data = await res.json();
-
-      // Debugging: Log the data to see what it looks like
-      console.log("API Response Data:", data);
-
-      if (data.results) {
-        setArticles(data.results);
-      } else {
-        setArticles([]); // This triggers the "No articles found"
+  // Infinite Scroll Observer
+  const observer = useRef();
+  const lastArticleElementRef = useCallback(node => {
+    if (loading) return;
+    if (observer.current) observer.current.disconnect();
+    
+    observer.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore) {
+        setPage(prevPage => prevPage + 1);
       }
-    } catch (err) {
-      console.error("Fetch error:", err);
-    }
-    setLoading(false);
-  };
-  const formatDate = (dateString) => {
-    if (!dateString) return "";
+    });
+    
+    if (node) observer.current.observe(node);
+  }, [loading, hasMore]);
 
-    const options = {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    };
-
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', options);
-  };
-  // Function for Keyword Search
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    if (!searchTerm) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${searchTerm}&api-key=${KEY}`);
-      const data = await res.json();
-      // Map Search API structure to match Top Stories structure
-      const results = data.response?.docs.map(doc => ({
+  // Normalize API data to a single format
+  const normalizeData = (data, isSearch) => {
+    if (isSearch) {
+      return data.response.docs.map(doc => ({
         title: doc.headline.main,
         abstract: doc.snippet,
         url: doc.web_url,
         multimedia: doc.multimedia
-      })) || [];
-      setArticles(results);
-    } catch (err) {
-      console.error("Search error:", err);
+      }));
     }
-    setLoading(false);
+    return data.results.map(art => ({
+      title: art.title,
+      abstract: art.abstract,
+      url: art.url,
+      multimedia: art.multimedia
+    }));
   };
 
+  // Fetch Logic
+  const fetchNews = async (isNewQuery = false) => {
+    setLoading(true);
+    try {
+      // If we have a search term or are on page > 0, we use the Search API
+      // Note: Top Stories API does not support pagination
+      let url;
+      let isSearchAPI = false;
+
+      if (searchTerm || page > 0 || (category !== 'home' && category !== '')) {
+        isSearchAPI = true;
+        const query = searchTerm || category;
+        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${query}&page=${page}&api-key=${KEY}`;
+      } else {
+        url = `https://api.nytimes.com/svc/topstories/v2/${category}.json?api-key=${KEY}`;
+      }
+
+      const res = await fetch(url);
+      if (res.status === 429) {
+        console.warn("Rate limit hit. Slowing down...");
+        return;
+      }
+      
+      const data = await res.json();
+      const results = normalizeData(data, isSearchAPI);
+
+      if (isNewQuery) {
+        setArticles(results);
+      } else {
+        setArticles(prev => [...prev, ...results]);
+      }
+
+      // NYT Search API provides pagination. Top Stories returns a fixed list (no more to load).
+      setHasMore(isSearchAPI && results.length > 0);
+      
+    } catch (err) {
+      console.error("Fetch error:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Effect: Trigger fetch when page or category changes
   useEffect(() => {
-    fetchNews(); // Initial load
-  }, []);
+    fetchNews(page === 0);
+  }, [page, category]);
+
+  // Handle Search Submission
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setArticles([]);
+    setPage(0);
+    setHasMore(true);
+    // If page was already 0, useEffect won't trigger, so we call manually
+    if (page === 0) fetchNews(true);
+  };
+
+  // Handle Category Change
+  const handleCategoryClick = (cat) => {
+    setSearchTerm('');
+    setCategory(cat);
+    setArticles([]);
+    setPage(0);
+    setHasMore(true);
+  };
+
+  const formatDate = (date) => {
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
+    });
+  };
 
   return (
-    <div className="App">
-      {/* Header */}
-      
-      <header className="text-center" style={{ padding: '20px 0', borderBottom: '1px solid #000' }}>
-        <h1 style={{ fontFamily: 'Chomsky, Georgia, serif', fontSize: '60px' }}>DAY 2 DAY NEWS</h1>
-        <p style={{ fontWeight: 'bold', textTransform: 'uppercase', letterSpacing: '1px' }}>
+    <div className="App" style={{ backgroundColor: '#fff' }}>
+      {/* Newspaper Header */}
+      <header className="text-center" style={{ padding: '40px 0', borderBottom: '3px double #000', marginBottom: '20px' }}>
+        <h1 style={{ fontFamily: 'Chomsky, Georgia, serif', fontSize: '80px', margin: '0' }}>DAY 2 DAY</h1>
+        <div style={{ borderTop: '1px solid #000', borderBottom: '1px solid #000', display: 'inline-block', padding: '5px 50px', marginTop: '10px', textTransform: 'uppercase', fontWeight: 'bold', letterSpacing: '2px' }}>
           {formatDate(new Date())}
-        </p>
+        </div>
       </header>
       
-      {/* Navbar & Search */}
-      <nav className="navbar navbar-default" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid #000' }}>
+      {/* Navigation */}
+      <nav className="navbar navbar-default" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid #000', backgroundColor: 'transparent' }}>
         <div className="container">
-          <ul className="nav navbar-nav">
-            <li><a href="#" onClick={() => fetchNews('home')}>Home</a></li>
-            <li><a href="#" onClick={() => fetchNews('world')}>World</a></li>
-            <li><a href="#" onClick={() => fetchNews('politics')}>Politics</a></li>
-            <li><a href="#" onClick={() => fetchNews('sports')}>Sports</a></li>
+          <ul className="nav navbar-nav" style={{ fontWeight: 'bold' }}>
+            <li><a href="#" onClick={() => handleCategoryClick('home')}>Home</a></li>
+            <li><a href="#" onClick={() => handleCategoryClick('world')}>World</a></li>
+            <li><a href="#" onClick={() => handleCategoryClick('politics')}>Politics</a></li>
+            <li><a href="#" onClick={() => handleCategoryClick('technology')}>Tech</a></li>
           </ul>
           <form className="navbar-form navbar-right" onSubmit={handleSearch}>
             <div className="input-group">
-              <input type="text" className="form-control" placeholder="Search news..."
-                value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <input 
+                type="text" 
+                className="form-control" 
+                placeholder="Search articles..."
+                value={searchTerm} 
+                onChange={(e) => setSearchTerm(e.target.value)} 
+              />
               <div className="input-group-btn">
-                <button className="btn btn-default" type="submit"><i className="glyphicon glyphicon-search"></i></button>
+                <button className="btn btn-default" type="submit">
+                  <i className="glyphicon glyphicon-search"></i>
+                </button>
               </div>
             </div>
           </form>
@@ -158,34 +199,49 @@ const KEY = "AbpjN7QUYO6RvE7f7EVK5MoqUc7JMu8HOgld7CGXjYU2DZOK";
 
       {/* Main Content */}
       <div className="container">
-        {loading ? (
-          <div className="text-center"><h3>Loading the latest stories...</h3></div>
-        ) : (
-          <div className="row">
-            {/* Left Column: News Feed */}
-            <div className="col-md-8" style={{ borderRight: '1px solid #eee' }}>
-              <div className="row">
-                {articles.length > 0 ? (
-                  articles.slice(0, 10).map((article, index) => (
-                    <NewsCard key={index} article={article} />
-                  ))
-                ) : <p>No articles found.</p>}
-              </div>
+        <div className="row">
+          {/* Main Feed */}
+          <div className="col-md-8" style={{ borderRight: '1px solid #eee' }}>
+            <div className="row">
+              {articles.map((article, index) => {
+                if (articles.length === index + 1) {
+                  return <NewsCard ref={lastArticleElementRef} key={`${index}-${article.title}`} article={article} />;
+                } else {
+                  return <NewsCard key={`${index}-${article.title}`} article={article} />;
+                }
+              })}
             </div>
 
-            {/* Right Column: Sidebar */}
-            <div className="col-md-4">
-              <h4 style={{ borderBottom: '2px solid #000', paddingBottom: '5px' }}>LATEST UPDATES</h4>
-              {articles.slice(10, 16).map((article, index) => (
-                <div key={index} style={{ marginBottom: '15px', borderBottom: '1px solid #f4f4f4' }}>
-                  <h5 style={{ fontFamily: 'Georgia', fontWeight: 'bold' }}>
-                    <a href={article.url} target="_blank" style={{ color: '#333' }}>{article.title}</a>
-                  </h5>
+            {loading && (
+              <div className="text-center" style={{ padding: '40px' }}>
+                <div className="loader" style={{ fontSize: '18px', fontFamily: 'Georgia' }}>
+                  Gathering more stories...
                 </div>
-              ))}
-            </div>
+              </div>
+            )}
+
+            {!hasMore && articles.length > 0 && (
+              <div className="text-center" style={{ padding: '40px', color: '#999' }}>
+                <hr />
+                <p>You have reached the end of the news feed.</p>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Sidebar */}
+          <div className="col-md-4">
+            <h3 style={{ fontFamily: 'Georgia', fontWeight: 'bold', borderBottom: '2px solid #000', paddingBottom: '10px' }}>
+              TRENDING
+            </h3>
+            {articles.slice(0, 6).map((article, index) => (
+              <div key={`side-${index}`} style={{ marginBottom: '15px', paddingBottom: '15px', borderBottom: '1px solid #f4f4f4' }}>
+                <h5 style={{ fontFamily: 'Georgia', fontWeight: 'bold', lineHeight: '1.4' }}>
+                  <a href={article.url} target="_blank" style={{ color: '#222' }}>{article.title}</a>
+                </h5>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
