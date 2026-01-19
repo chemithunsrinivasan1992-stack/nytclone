@@ -173,10 +173,10 @@ function App() {
       <nav className="navbar navbar-default" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid #000', backgroundColor: 'transparent' }}>
         <div className="container">
           <ul className="nav navbar-nav" style={{ fontWeight: 'bold' }}>
-            <li><a href="#" onClick={() => handleCategoryClick('home')}>Home</a></li>
-            <li><a href="#" onClick={() => handleCategoryClick('world')}>World</a></li>
-            <li><a href="#" onClick={() => handleCategoryClick('politics')}>Politics</a></li>
-            <li><a href="#" onClick={() => handleCategoryClick('technology')}>Tech</a></li>
+            <li><a href="/" onClick={() => handleCategoryClick('home')}>Home</a></li>
+            <li><a href="/" onClick={() => handleCategoryClick('world')}>World</a></li>
+            <li><a href="/" onClick={() => handleCategoryClick('politics')}>Politics</a></li>
+            <li><a href="/" onClick={() => handleCategoryClick('technology')}>Tech</a></li>
           </ul>
           <form className="navbar-form navbar-right" onSubmit={handleSearch}>
             <div className="input-group">
