@@ -1,247 +1,232 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { fetchArticles } from './api/nytApi';
+import NewsCard from './components/NewsCard';
 import './App.css';
 
-/**
- * 1. NewsCard Component
- * Handles data from both Search and Top Stories APIs
- */
-const NewsCard = React.forwardRef(({ article }, ref) => {
-  if (!article) return null;
-
-  const getImageUrl = (art) => {
-    if (!art.multimedia || art.multimedia.length === 0) {
-      return "https://via.placeholder.com/600x400?text=No+Image+Available";
-    }
-    const media = art.multimedia[0].url;
-    // Search API uses relative paths, Top Stories uses absolute
-    return media.startsWith("http") ? media : `https://www.nytimes.com/${media}`;
-  };
-
-  return (
-    <div className="col-md-6" style={{ marginBottom: '30px' }} ref={ref}>
-      <div className="thumbnail" style={{ border: 'none', borderBottom: '1px solid #ddd', paddingBottom: '20px', borderRadius: '0' }}>
-        <img 
-          src={getImageUrl(article)} 
-          className="img-responsive" 
-          alt={article.title}
-          style={{ height: '250px', width: '100%', objectFit: 'cover' }} 
-        />
-        <div className="caption" style={{ padding: '15px 0' }}>
-          <h4 style={{ fontFamily: 'Georgia, serif', fontWeight: 'bold', minHeight: '50px' }}>
-            {article.title}
-          </h4>
-          <p className="small text-muted" style={{ lineHeight: '1.6' }}>
-            {article.abstract?.substring(0, 150)}...
-          </p>
-          <a href={article.url} target="_blank" rel="noreferrer" className="btn btn-sm btn-default">
-            Read Full Article
-          </a>
-        </div>
-      </div>
-    </div>
-  );
-});
-
 function App() {
-  // Constants
-  const KEY = "AbpjN7QUYO6RvE7f7EVK5MoqUc7JMu8HOgld7CGXjYU2DZOK";
-  
-  // State
+  // --- State Management ---
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [category, setCategory] = useState('home');
+  const [showScroll, setShowScroll] = useState(false);
 
-  // Infinite Scroll Observer
+  // --- Search History State ---
+  const [history, setHistory] = useState([]);
+
+  // --- Infinite Scroll Observer ---
   const observer = useRef();
-  const lastArticleElementRef = useCallback(node => {
-    if (loading) return;
+  const lastArticleRef = useCallback(node => {
+    if (loading) return; // Don't trigger if already fetching
     if (observer.current) observer.current.disconnect();
-    
+
     observer.current = new IntersectionObserver(entries => {
+      // entry[0].isIntersecting means the last card is now visible on screen
       if (entries[0].isIntersecting && hasMore) {
-        setPage(prevPage => prevPage + 1);
+        setPage(prev => prev + 1); // This "applies" the next page
       }
     });
-    
+
     if (node) observer.current.observe(node);
   }, [loading, hasMore]);
+  // 1. Add this state at the top of your App component
+  const [scrollProgress, setScrollProgress] = useState(0);
 
-  // Normalize API data to a single format
-  const normalizeData = (data, isSearch) => {
-    if (isSearch) {
-      return data.response.docs.map(doc => ({
-        title: doc.headline.main,
-        abstract: doc.snippet,
-        url: doc.web_url,
-        multimedia: doc.multimedia
-      }));
-    }
-    return data.results.map(art => ({
-      title: art.title,
-      abstract: art.abstract,
-      url: art.url,
-      multimedia: art.multimedia
-    }));
-  };
-
-  // Fetch Logic
-  const fetchNews = async (isNewQuery = false) => {
-    setLoading(true);
-    try {
-      // If we have a search term or are on page > 0, we use the Search API
-      // Note: Top Stories API does not support pagination
-      let url;
-      let isSearchAPI = false;
-
-      if (searchTerm || page > 0 || (category !== 'home' && category !== '')) {
-        isSearchAPI = true;
-        const query = searchTerm || category;
-        url = `https://api.nytimes.com/svc/search/v2/articlesearch.json?q=${query}&page=${page}&api-key=${KEY}`;
-      } else {
-        url = `https://api.nytimes.com/svc/topstories/v2/${category}.json?api-key=${KEY}`;
-      }
-
-      const res = await fetch(url);
-      if (res.status === 429) {
-        console.warn("Rate limit hit. Slowing down...");
-        return;
-      }
-      
-      const data = await res.json();
-      const results = normalizeData(data, isSearchAPI);
-
-      if (isNewQuery) {
-        setArticles(results);
-      } else {
-        setArticles(prev => [...prev, ...results]);
-      }
-
-      // NYT Search API provides pagination. Top Stories returns a fixed list (no more to load).
-      setHasMore(isSearchAPI && results.length > 0);
-      
-    } catch (err) {
-      console.error("Fetch error:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Effect: Trigger fetch when page or category changes
+  // 2. Update your scroll useEffect
   useEffect(() => {
-    fetchNews(page === 0);
-  }, [page, category]);
+    const handleScroll = () => {
+      // Calculate Scroll Progress
+      const totalHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      const windowScroll = window.pageYOffset;
+      const scrollPercent = (windowScroll / totalHeight) * 100;
+      setScrollProgress(scrollPercent);
 
-  // Handle Search Submission
-  const handleSearch = (e) => {
-    e.preventDefault();
+      // Back to top button visibility
+      setShowScroll(windowScroll > 400);
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+  // --- Main Data Fetching ---
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      try {
+        // We pass category, searchTerm, and page to our API layer
+        const result = await fetchArticles({ category, searchTerm, page });
+
+        setArticles(prev => (page === 0 ? result.articles : [...prev, ...result.articles]));
+        setHasMore(result.hasMore && result.articles.length > 0);
+      } catch (err) {
+        console.error("API Error:", err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadData();
+  }, [page, category]); // Triggers whenever page or category changes
+
+  // --- Scroll Monitoring ---
+  useEffect(() => {
+    const checkScrollTop = () => {
+      setShowScroll(window.pageYOffset > 400);
+    };
+    window.addEventListener('scroll', checkScrollTop);
+    return () => window.removeEventListener('scroll', checkScrollTop);
+  }, []);
+
+  // --- Event Handlers ---
+  const addToHistory = (term) => {
+    if (!term || history.includes(term)) return;
+    setHistory(prev => [term, ...prev].slice(0, 5)); // Keep last 5 searches
+  };
+
+  const handleSearchSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (!searchTerm.trim()) return;
+
+    addToHistory(searchTerm);
+    setCategory(''); // Clear category when searching specifically
     setArticles([]);
     setPage(0);
-    setHasMore(true);
-    // If page was already 0, useEffect won't trigger, so we call manually
-    if (page === 0) fetchNews(true);
   };
 
-  // Handle Category Change
-  const handleCategoryClick = (cat) => {
-    setSearchTerm('');
+  const handleCategoryChange = (cat, e) => {
+    if (e) e.preventDefault();
+    setSearchTerm(''); // Clear search when switching categories
     setCategory(cat);
     setArticles([]);
     setPage(0);
-    setHasMore(true);
   };
 
-  const formatDate = (date) => {
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
-    });
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   return (
-    <div className="App" style={{ backgroundColor: '#fff' }}>
+    <div className="App" style={{ backgroundColor: '#fff', minHeight: '100vh' }}>
       {/* Newspaper Header */}
-      <header className="text-center" style={{ padding: '40px 0', borderBottom: '3px double #000', marginBottom: '20px' }}>
-        <h1 style={{ fontFamily: 'Chomsky, Georgia, serif', fontSize: '80px', margin: '0' }}>DAY 2 DAY</h1>
-        <div style={{ borderTop: '1px solid #000', borderBottom: '1px solid #000', display: 'inline-block', padding: '5px 50px', marginTop: '10px', textTransform: 'uppercase', fontWeight: 'bold', letterSpacing: '2px' }}>
-          {formatDate(new Date())}
-        </div>
+      {/* Progress Bar Container */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        width: '100%',
+        height: '5px',
+        backgroundColor: '#f0f0f0',
+        zIndex: 9999
+      }}>
+        {/* Actual Progress Fill */}
+        <div style={{
+          width: `${scrollProgress}%`,
+          height: '100%',
+          backgroundColor: '#000', // Black to match the newspaper theme
+          transition: 'width 0.1s ease-out'
+        }} />
+      </div>
+      <header className="text-center" style={{ padding: '40px 0', borderBottom: '3px double #000' }}>
+        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: '80px', margin: '0', fontWeight: 'bold' }}>DAY 2 DAY</h1>
+        <p style={{ letterSpacing: '3px', fontWeight: 'bold' }}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
       </header>
-      
+
       {/* Navigation */}
-      <nav className="navbar navbar-default" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid #000', backgroundColor: 'transparent' }}>
+      <nav className="navbar navbar-default" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid #000' }}>
         <div className="container">
           <ul className="nav navbar-nav" style={{ fontWeight: 'bold' }}>
-            <li><a href="/" onClick={() => handleCategoryClick('home')}>Home</a></li>
-            <li><a href="/" onClick={() => handleCategoryClick('world')}>World</a></li>
-            <li><a href="/" onClick={() => handleCategoryClick('politics')}>Politics</a></li>
-            <li><a href="/" onClick={() => handleCategoryClick('technology')}>Tech</a></li>
+            <li><a href="/" onClick={(e) => handleCategoryChange('home', e)}>Home</a></li>
+            <li><a href="/" onClick={(e) => handleCategoryChange('world', e)}>World</a></li>
+            <li><a href="/" onClick={(e) => handleCategoryChange('politics', e)}>Politics</a></li>
+            <li><a href="/" onClick={(e) => handleCategoryChange('technology', e)}>Tech</a></li>
           </ul>
-          <form className="navbar-form navbar-right" onSubmit={handleSearch}>
+          <form className="navbar-form navbar-right" onSubmit={handleSearchSubmit}>
             <div className="input-group">
-              <input 
-                type="text" 
-                className="form-control" 
-                placeholder="Search articles..."
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Search..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
               <div className="input-group-btn">
-                <button className="btn btn-default" type="submit">
-                  <i className="glyphicon glyphicon-search"></i>
-                </button>
+                <button className="btn btn-default" type="submit">Search</button>
               </div>
             </div>
           </form>
         </div>
       </nav>
 
-      {/* Main Content */}
       <div className="container">
         <div className="row">
           {/* Main Feed */}
           <div className="col-md-8" style={{ borderRight: '1px solid #eee' }}>
+            <h2 style={{ fontFamily: 'Georgia', textTransform: 'capitalize', marginBottom: '20px' }}>
+              {searchTerm ? `Results for: ${searchTerm}` : `${category} News`}
+            </h2>
+
             <div className="row">
-              {articles.map((article, index) => {
-                if (articles.length === index + 1) {
-                  return <NewsCard ref={lastArticleElementRef} key={`${index}-${article.title}`} article={article} />;
-                } else {
-                  return <NewsCard key={`${index}-${article.title}`} article={article} />;
-                }
-              })}
+              {articles.map((article, index) => (
+                <NewsCard
+                  key={`${article.id}-${index}`}
+                  ref={articles.length === index + 1 ? lastArticleRef : null}
+                  article={article}
+                />
+              ))}
             </div>
 
-            {loading && (
-              <div className="text-center" style={{ padding: '40px' }}>
-                <div className="loader" style={{ fontSize: '18px', fontFamily: 'Georgia' }}>
-                  Gathering more stories...
-                </div>
-              </div>
-            )}
-
-            {!hasMore && articles.length > 0 && (
-              <div className="text-center" style={{ padding: '40px', color: '#999' }}>
-                <hr />
-                <p>You have reached the end of the news feed.</p>
-              </div>
-            )}
+            {loading && <div className="text-center" style={{ padding: '20px' }}>Loading stories...</div>}
           </div>
 
           {/* Sidebar */}
           <div className="col-md-4">
-            <h3 style={{ fontFamily: 'Georgia', fontWeight: 'bold', borderBottom: '2px solid #000', paddingBottom: '10px' }}>
-              TRENDING
-            </h3>
-            {articles.slice(0, 6).map((article, index) => (
-              <div key={`side-${index}`} style={{ marginBottom: '15px', paddingBottom: '15px', borderBottom: '1px solid #f4f4f4' }}>
-                <h5 style={{ fontFamily: 'Georgia', fontWeight: 'bold', lineHeight: '1.4' }}>
-                  <a href={article.url} target="_blank" style={{ color: '#222' }}>{article.title}</a>
-                </h5>
-              </div>
-            ))}
+            <div style={{ position: 'sticky', top: '20px' }}>
+
+              {/* Search History Section */}
+              {history.length > 0 && (
+                <div style={{ marginBottom: '30px', padding: '15px', backgroundColor: '#f9f9f9', border: '1px solid #ddd' }}>
+                  <h4 style={{ fontFamily: 'Georgia', fontWeight: 'bold', marginTop: 0 }}>Recent Searches</h4>
+                  <ul className="list-unstyled">
+                    {history.map((term, i) => (
+                      <li key={i} style={{ marginBottom: '5px' }}>
+                        <button
+                          onClick={() => { setSearchTerm(term); setPage(0); setArticles([]); }}
+                          className="btn btn-link btn-xs"
+                          style={{ color: '#555', padding: 0 }}
+                        >
+                          <i className="glyphicon glyphicon-time"></i> {term}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <h3 style={{ fontFamily: 'Georgia', fontWeight: 'bold', borderBottom: '2px solid #000', paddingBottom: '10px' }}>
+                TRENDING
+              </h3>
+              {articles.slice(0, 5).map((article, index) => (
+                <div key={`side-${index}`} style={{ marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
+                  <a href={article.url} target="_blank" rel="noreferrer" style={{ color: '#333', fontWeight: 'bold', textDecoration: 'none' }}>
+                    {article.title}
+                  </a>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+      </div>
+
+      {/* Floating UI Elements */}
+      <div style={{ position: 'fixed', bottom: '20px', right: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {page > 0 && <div style={{ background: '#000', color: '#fff', padding: '5px 15px', borderRadius: '20px', fontSize: '12px' }}>Page {page + 1}</div>}
+        {showScroll && (
+          <button onClick={scrollToTop} className="btn btn-default" style={{ borderRadius: '50%', width: '45px', height: '45px', border: '2px solid #000' }}>
+            ↑
+          </button>
+        )}
       </div>
     </div>
   );
