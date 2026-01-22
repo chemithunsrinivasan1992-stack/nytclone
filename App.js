@@ -14,7 +14,7 @@ function App() {
   const [showScroll, setShowScroll] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
 
-  const MAX_ARTICLES = 200;
+  const MAX_ARTICLES = 100;
 
   // --- 1. The Core Fetcher ---
   const loadData = useCallback(async () => {
