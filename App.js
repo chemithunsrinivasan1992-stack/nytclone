@@ -10,15 +10,15 @@ function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [category, setCategory] = useState('home'); // Default to home
+  const [category, setCategory] = useState('home');
   const [showScroll, setShowScroll] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
 
-  const MAX_ARTICLES = 100;
+  const MAX_ARTICLES = 200;
 
-  // --- 1. The Core Fetcher ---
+  // --- 1. Fetching Logic (Stabilized for Build) ---
   const loadData = useCallback(async () => {
-    // Stop if we hit 200, if API is exhausted, or if already loading
+    // Stop if we hit 200, if already loading, or if API exhausted
     if (articles.length >= MAX_ARTICLES || !hasMore || loading) return;
 
     setLoading(true);
@@ -29,7 +29,7 @@ function App() {
         setArticles(prev => {
           const combined = page === 0 ? result.articles : [...prev, ...result.articles];
           
-          // Hard cap at 200
+          // Enforce 200 limit strictly
           if (combined.length >= MAX_ARTICLES) {
             setHasMore(false);
             return combined.slice(0, MAX_ARTICLES);
@@ -47,21 +47,21 @@ function App() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, category, searchTerm]); 
+  }, [page, category, searchTerm, hasMore]); 
 
-  // Trigger load whenever page/category/search changes
+  // Trigger load whenever dependencies change
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // --- 2. Intersection Observer (Infinite Scroll) ---
+  // --- 2. Infinite Scroll Observer ---
   const observer = useRef();
   const lastArticleRef = useCallback(node => {
     if (loading) return;
     if (observer.current) observer.current.disconnect();
 
     observer.current = new IntersectionObserver(entries => {
-      // If the last card appears on screen, fetch the next page
+      // Trigger next page when last card appears
       if (entries[0].isIntersecting && hasMore && articles.length < MAX_ARTICLES) {
         setPage(prev => prev + 1);
       }
@@ -70,11 +70,11 @@ function App() {
     if (node) observer.current.observe(node);
   }, [loading, hasMore, articles.length]);
 
-  // --- 3. Scroll UI Logic ---
+  // --- 3. Progress & Scroll Listeners ---
   useEffect(() => {
     const handleScroll = () => {
       const totalHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      const progress = (window.pageYOffset / totalHeight) * 100;
+      const progress = totalHeight > 0 ? (window.pageYOffset / totalHeight) * 100 : 0;
       setScrollProgress(progress);
       setShowScroll(window.pageYOffset > 400);
     };
@@ -85,10 +85,10 @@ function App() {
   // --- 4. Navigation Reseters ---
   const handleCategoryChange = (newCat, e) => {
     if (e) e.preventDefault();
-    setArticles([]);    // Reset list
-    setPage(0);         // Reset to first page
-    setHasMore(true);   // Re-enable fetching
-    setSearchTerm('');  // Clear search
+    setArticles([]);    
+    setPage(0);         
+    setHasMore(true);   
+    setSearchTerm('');  
     setCategory(newCat);
   };
 
@@ -103,34 +103,29 @@ function App() {
 
   return (
     <div className="App" style={{ backgroundColor: '#fff', minHeight: '100vh' }}>
-      {/* Newspaper Top Progress Bar */}
+      {/* Progress Bar */}
       <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '6px', backgroundColor: '#eee', zIndex: 9999 }}>
         <div style={{ width: `${scrollProgress}%`, height: '100%', backgroundColor: '#000', transition: 'width 0.2s' }} />
       </div>
 
-      <header className="text-center" style={{ padding: '40px 0', borderBottom: '4px double #000' }}>
-        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: '70px', fontWeight: 'bold', margin: 0 }}>DAY 2 DAY</h1>
-        <p style={{ letterSpacing: '4px', margin: '10px 0', fontWeight: 'bold' }}>
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
-        </p>
+      <header className="text-center" style={{ padding: '30px 0', borderBottom: '4px double #000' }}>
+        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: '60px', fontWeight: 'bold', margin: 0 }}>DAY 2 DAY</h1>
+        <p style={{ letterSpacing: '2px', fontWeight: 'bold' }}>THE 200-ARTICLE ARCHIVE</p>
       </header>
 
-      {/* Main Navigation */}
-      <nav className="navbar navbar-default" style={{ border: 'none', borderBottom: '1px solid #000', borderRadius: 0, marginBottom: '20px' }}>
+      {/* Navigation */}
+      <nav className="navbar navbar-default" style={{ border: 'none', borderBottom: '1px solid #000', borderRadius: 0 }}>
         <div className="container">
-          <ul className="nav navbar-nav" style={{ width: '100%', display: 'flex', justifyContent: 'center', fontWeight: 'bold' }}>
+          <ul className="nav navbar-nav" style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
             {['home', 'world', 'politics', 'technology'].map(cat => (
-              <li key={cat} className={category === cat ? 'active' : ''}>
+              <li key={cat}>
                 <button 
                   onClick={(e) => handleCategoryChange(cat, e)} 
                   className="btn btn-link" 
                   style={{ 
-                    color: '#000', 
-                    textTransform: 'uppercase', 
-                    padding: '15px 25px', 
-                    textDecoration: 'none', 
-                    borderBottom: category === cat ? '3px solid #000' : 'none',
-                    fontWeight: 'bold'
+                    color: '#000', textTransform: 'uppercase', padding: '15px 20px', 
+                    fontWeight: category === cat ? 'bold' : 'normal',
+                    textDecoration: 'none'
                   }}
                 >
                   {cat}
@@ -138,14 +133,23 @@ function App() {
               </li>
             ))}
           </ul>
+          <form className="navbar-form navbar-right" onSubmit={handleSearchSubmit}>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="Search..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </form>
         </div>
       </nav>
 
       <div className="container">
         <div className="row">
           <div className="col-md-9" style={{ borderRight: '1px solid #eee' }}>
-            <h2 style={{ fontFamily: 'Georgia', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '10px' }}>
-              {searchTerm ? `Search: ${searchTerm}` : `${category} Edition`}
+            <h2 style={{ fontFamily: 'Georgia', textTransform: 'uppercase' }}>
+              {searchTerm ? `Search: ${searchTerm}` : `${category} Section`}
             </h2>
 
             <div className="row">
@@ -158,37 +162,22 @@ function App() {
               ))}
             </div>
 
-            {loading && (
-              <div className="text-center" style={{ padding: '40px' }}>
-                <div className="spinner-border" role="status"></div>
-                <h4>Loading more from the archives...</h4>
-              </div>
-            )}
+            {loading && <div className="text-center" style={{ padding: '30px' }}><h4>Loading more stories...</h4></div>}
             
             {!hasMore && articles.length >= MAX_ARTICLES && (
-              <div className="text-center" style={{ padding: '60px', borderTop: '2px solid #000', marginTop: '30px', backgroundColor: '#fcfcfc' }}>
-                <p style={{ fontFamily: 'Georgia', fontSize: '20px', fontStyle: 'italic' }}>
-                  You have viewed the full 200-article limit for the {category || 'search'} section.
-                </p>
+              <div className="text-center" style={{ padding: '40px', borderTop: '2px solid #000', marginTop: '20px' }}>
+                <p style={{ fontFamily: 'Georgia', fontStyle: 'italic' }}>You have reached the limit of 200 articles for this section.</p>
               </div>
             )}
           </div>
 
-          {/* Sidebar Tracking */}
           <div className="col-md-3">
-            <div style={{ position: 'sticky', top: '20px', padding: '15px', backgroundColor: '#fff' }}>
-              <h4 style={{ fontWeight: 'bold', borderBottom: '2px solid #000', paddingBottom: '5px' }}>FEED PROGRESS</h4>
-              <p style={{ fontSize: '16px' }}>Articles Loaded: <strong>{articles.length}</strong> / 200</p>
-              <div style={{ background: '#eee', height: '12px', width: '100%', borderRadius: '6px', overflow: 'hidden' }}>
-                <div style={{ 
-                  background: '#000', 
-                  height: '100%', 
-                  width: `${(articles.length / 200) * 100}%`,
-                  transition: 'width 0.3s ease-in-out'
-                }} />
+            <div style={{ position: 'sticky', top: '20px', padding: '10px', background: '#f9f9f9' }}>
+              <h4 style={{ fontWeight: 'bold', borderBottom: '2px solid #000' }}>READING PROGRESS</h4>
+              <p>Loaded: <strong>{articles.length}</strong> / 200</p>
+              <div style={{ background: '#ddd', height: '10px', width: '100%' }}>
+                <div style={{ background: '#000', height: '100%', width: `${(articles.length / 200) * 100}%` }} />
               </div>
-              <hr />
-              <p className="small text-muted">Scroll down to load more stories automatically.</p>
             </div>
           </div>
         </div>
@@ -197,13 +186,7 @@ function App() {
       {showScroll && (
         <button 
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} 
-          style={{ 
-            position: 'fixed', bottom: '30px', right: '30px', 
-            borderRadius: '50%', width: '55px', height: '55px', 
-            backgroundColor: '#000', color: '#fff', border: 'none', 
-            fontSize: '24px', cursor: 'pointer', zIndex: 1000,
-            boxShadow: '0 4px 8px rgba(0,0,0,0.3)'
-          }}
+          style={{ position: 'fixed', bottom: '30px', right: '30px', borderRadius: '50%', width: '50px', height: '50px', backgroundColor: '#000', color: '#fff', border: 'none', zIndex: 1000 }}
         >
           ↑
         </button>
