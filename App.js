@@ -13,60 +13,55 @@ function App() {
   const [category, setCategory] = useState('home');
   const [showScroll, setShowScroll] = useState(false);
   const [scrollProgress, setScrollProgress] = useState(0);
-  const [history, setHistory] = useState([]);
 
   const MAX_ARTICLES = 200;
 
-  // --- 1. Fetching Logic wrapped in useCallback to satisfy Linter ---
+  // --- 1. Fetching Logic ---
   const loadData = useCallback(async () => {
-    // Prevent fetching if we've already hit the 200 cap
-    if (articles.length >= MAX_ARTICLES && page !== 0) {
-      setHasMore(false);
-      return;
-    }
+    // Stop if we hit 200 or there's no more data from API
+    if (articles.length >= MAX_ARTICLES || !hasMore) return;
 
     setLoading(true);
     try {
+      // Pass category, searchTerm, and current page to the API
       const result = await fetchArticles({ category, searchTerm, page });
+      
+      if (result && result.articles) {
+        setArticles(prev => {
+          const combined = page === 0 ? result.articles : [...prev, ...result.articles];
+          
+          // Hard cap at 200
+          if (combined.length >= MAX_ARTICLES) {
+            setHasMore(false);
+            return combined.slice(0, MAX_ARTICLES);
+          }
+          return combined;
+        });
 
-      setArticles(prev => {
-        const combined = page === 0 ? result.articles : [...prev, ...result.articles];
-        
-        // Enforce a hard stop at exactly 200 articles
-        if (combined.length >= MAX_ARTICLES) {
-          setHasMore(false);
-          return combined.slice(0, MAX_ARTICLES);
-        }
-        return combined;
-      });
-
-      // Update hasMore based on API response and our internal limit
-      const apiHasMore = result.hasMore && result.articles.length > 0;
-      const underLimit = (articles.length + (result.articles?.length || 0)) < MAX_ARTICLES;
-      setHasMore(apiHasMore && underLimit);
-
+        // Determine if more fetching is possible
+        const canFetchMore = result.hasMore && result.articles.length > 0;
+        if (!canFetchMore) setHasMore(false);
+      }
     } catch (err) {
-      console.error("API Error:", err.message);
+      console.error("Fetch Error:", err.message);
     } finally {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, category, searchTerm]); 
-  // Note: We exclude articles.length from dependencies here to prevent infinite loops, 
-  // but we use the eslint-disable comment to tell Vercel this is intentional.
+  }, [page, category, searchTerm]);
 
-  // --- 2. Main Data Fetching Trigger ---
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // --- Infinite Scroll Observer ---
+  // --- 2. Infinite Scroll Observer ---
   const observer = useRef();
   const lastArticleRef = useCallback(node => {
-    if (loading) return; 
+    if (loading) return;
     if (observer.current) observer.current.disconnect();
 
     observer.current = new IntersectionObserver(entries => {
+      // Trigger next page when the last card is visible
       if (entries[0].isIntersecting && hasMore && articles.length < MAX_ARTICLES) {
         setPage(prev => prev + 1);
       }
@@ -75,161 +70,107 @@ function App() {
     if (node) observer.current.observe(node);
   }, [loading, hasMore, articles.length]);
 
-  // --- Scroll & Progress Listener ---
+  // --- 3. Scroll UI Logic ---
   useEffect(() => {
     const handleScroll = () => {
       const totalHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
-      const windowScroll = window.pageYOffset;
-      const scrollPercent = (windowScroll / totalHeight) * 100;
+      const scrollPercent = (window.pageYOffset / totalHeight) * 100;
       setScrollProgress(scrollPercent);
-      setShowScroll(windowScroll > 400);
+      setShowScroll(window.pageYOffset > 400);
     };
-
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // --- Event Handlers ---
-  const addToHistory = (term) => {
-    if (!term || history.includes(term)) return;
-    setHistory(prev => [term, ...prev].slice(0, 5));
+  // --- 4. Menu / Search Handlers (The "Reseters") ---
+  const handleCategoryChange = (newCat, e) => {
+    if (e) e.preventDefault();
+    setArticles([]);    // Clear old articles
+    setPage(0);         // Reset to page 1
+    setHasMore(true);   // Re-enable fetching
+    setSearchTerm('');  // Clear search
+    setCategory(newCat);
   };
 
   const handleSearchSubmit = (e) => {
     if (e) e.preventDefault();
     if (!searchTerm.trim()) return;
-
-    addToHistory(searchTerm);
-    setCategory(''); 
     setArticles([]);
     setPage(0);
     setHasMore(true);
-  };
-
-  const handleCategoryChange = (cat, e) => {
-    if (e) e.preventDefault();
-    setSearchTerm(''); 
-    setCategory(cat);
-    setArticles([]);
-    setPage(0);
-    setHasMore(true);
-  };
-
-  const scrollToTop = () => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setCategory(''); // Clear category when searching
   };
 
   return (
     <div className="App" style={{ backgroundColor: '#fff', minHeight: '100vh' }}>
-      <div style={{
-        position: 'fixed', top: 0, left: 0, width: '100%', height: '5px',
-        backgroundColor: '#f0f0f0', zIndex: 9999
-      }}>
-        <div style={{
-          width: `${scrollProgress}%`, height: '100%',
-          backgroundColor: '#000', transition: 'width 0.1s ease-out'
-        }} />
+      {/* Newspaper Style Progress Bar */}
+      <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '6px', backgroundColor: '#eee', zIndex: 9999 }}>
+        <div style={{ width: `${scrollProgress}%`, height: '100%', backgroundColor: '#000', transition: 'width 0.2s' }} />
       </div>
 
-      <header className="text-center" style={{ padding: '40px 0', borderBottom: '3px double #000' }}>
-        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: '80px', margin: '0', fontWeight: 'bold' }}>DAY 2 DAY</h1>
-        <p style={{ letterSpacing: '3px', fontWeight: 'bold' }}>{new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+      <header className="text-center" style={{ padding: '30px 0', borderBottom: '4px double #000', marginBottom: '20px' }}>
+        <h1 style={{ fontFamily: 'Georgia, serif', fontSize: '65px', fontWeight: 'bold', margin: 0 }}>DAY 2 DAY</h1>
+        <div style={{ borderTop: '1px solid #000', borderBottom: '1px solid #000', display: 'inline-block', padding: '5px 20px', margin: '10px 0', fontWeight: 'bold', textTransform: 'uppercase' }}>
+          {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+        </div>
       </header>
 
-      <nav className="navbar navbar-default" style={{ borderRadius: 0, border: 'none', borderBottom: '1px solid #000' }}>
+      <nav className="navbar navbar-default" style={{ border: 'none', borderBottom: '1px solid #000', background: 'transparent' }}>
         <div className="container">
-          <ul className="nav navbar-nav" style={{ fontWeight: 'bold' }}>
-            <li><button className="btn btn-link" onClick={(e) => handleCategoryChange('home', e)} style={{ color: '#333', textDecoration: 'none', marginTop: '15px' }}>Home</button></li>
-            <li><button className="btn btn-link" onClick={(e) => handleCategoryChange('world', e)} style={{ color: '#333', textDecoration: 'none', marginTop: '15px' }}>World</button></li>
-            <li><button className="btn btn-link" onClick={(e) => handleCategoryChange('politics', e)} style={{ color: '#333', textDecoration: 'none', marginTop: '15px' }}>Politics</button></li>
-            <li><button className="btn btn-link" onClick={(e) => handleCategoryChange('technology', e)} style={{ color: '#333', textDecoration: 'none', marginTop: '15px' }}>Tech</button></li>
+          <ul className="nav navbar-nav" style={{ display: 'flex', justifyContent: 'center', width: '100%', fontWeight: 'bold' }}>
+            {['home', 'world', 'politics', 'technology'].map(cat => (
+              <li key={cat} className={category === cat ? 'active' : ''}>
+                <button onClick={(e) => handleCategoryChange(cat, e)} className="btn btn-link" style={{ color: '#000', textTransform: 'uppercase', padding: '15px 20px', textDecoration: category === cat ? 'underline' : 'none' }}>
+                  {cat}
+                </button>
+              </li>
+            ))}
           </ul>
-          <form className="navbar-form navbar-right" onSubmit={handleSearchSubmit}>
-            <div className="input-group">
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <div className="input-group-btn">
-                <button className="btn btn-default" type="submit">Search</button>
-              </div>
-            </div>
-          </form>
         </div>
       </nav>
 
       <div className="container">
         <div className="row">
-          <div className="col-md-8" style={{ borderRight: '1px solid #eee' }}>
-            <h2 style={{ fontFamily: 'Georgia', textTransform: 'capitalize', marginBottom: '20px' }}>
-              {searchTerm ? `Results for: ${searchTerm}` : `${category} News`}
-            </h2>
+          <div className="col-md-9" style={{ borderRight: '1px solid #ddd' }}>
+            <h3 style={{ fontFamily: 'Georgia', textTransform: 'uppercase', borderBottom: '1px solid #000', paddingBottom: '10px' }}>
+              {searchTerm ? `Search: ${searchTerm}` : `${category} news`}
+            </h3>
 
             <div className="row">
               {articles.map((article, index) => (
                 <NewsCard
-                  key={`${article.id || index}-${index}`}
+                  key={`${article.id || index}`}
                   ref={articles.length === index + 1 ? lastArticleRef : null}
                   article={article}
                 />
               ))}
             </div>
 
-            {loading && <div className="text-center" style={{ padding: '20px' }}>Loading stories...</div>}
+            {loading && <div className="text-center" style={{ padding: '50px' }}><h4>Loading more articles...</h4></div>}
+            
             {!hasMore && articles.length >= MAX_ARTICLES && (
-              <div className="text-center" style={{ padding: '20px', color: '#888' }}>
-                You've reached the limit of 200 articles.
+              <div className="text-center" style={{ padding: '40px', backgroundColor: '#f9f9f9', marginTop: '20px' }}>
+                <p style={{ fontFamily: 'Georgia', fontStyle: 'italic' }}>End of the {category} feed. You've viewed 200 articles.</p>
               </div>
             )}
           </div>
 
-          <div className="col-md-4">
+          <div className="col-md-3">
             <div style={{ position: 'sticky', top: '20px' }}>
-              {history.length > 0 && (
-                <div style={{ marginBottom: '30px', padding: '15px', backgroundColor: '#f9f9f9', border: '1px solid #ddd' }}>
-                  <h4 style={{ fontFamily: 'Georgia', fontWeight: 'bold', marginTop: 0 }}>Recent Searches</h4>
-                  <ul className="list-unstyled">
-                    {history.map((term, i) => (
-                      <li key={i} style={{ marginBottom: '5px' }}>
-                        <button
-                          onClick={() => { setSearchTerm(term); setPage(0); setArticles([]); setHasMore(true); }}
-                          className="btn btn-link btn-xs"
-                          style={{ color: '#555', padding: 0 }}
-                        >
-                          <i className="glyphicon glyphicon-time"></i> {term}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <h3 style={{ fontFamily: 'Georgia', fontWeight: 'bold', borderBottom: '2px solid #000', paddingBottom: '10px' }}>
-                TRENDING
-              </h3>
-              {articles.slice(0, 5).map((article, index) => (
-                <div key={`side-${index}`} style={{ marginBottom: '15px', borderBottom: '1px solid #eee', paddingBottom: '10px' }}>
-                  <a href={article.url} target="_blank" rel="noreferrer" style={{ color: '#333', fontWeight: 'bold', textDecoration: 'none' }}>
-                    {article.title}
-                  </a>
-                </div>
-              ))}
+              <h4 style={{ fontWeight: 'bold', borderBottom: '2px solid #000' }}>STATUS</h4>
+              <p>Loaded: <strong>{articles.length}</strong> / 200</p>
+              <progress value={articles.length} max="200" style={{ width: '100%' }}></progress>
             </div>
           </div>
         </div>
       </div>
 
-      <div style={{ position: 'fixed', bottom: '20px', right: '20px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        {articles.length > 0 && <div style={{ background: '#000', color: '#fff', padding: '5px 15px', borderRadius: '20px', fontSize: '12px' }}>{articles.length} / 200 Articles</div>}
-        {showScroll && (
-          <button onClick={scrollToTop} className="btn btn-default" style={{ borderRadius: '50%', width: '45px', height: '45px', border: '2px solid #000' }}>
-            ↑
-          </button>
-        )}
-      </div>
+      {showScroll && (
+        <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} 
+                style={{ position: 'fixed', bottom: '30px', right: '30px', borderRadius: '50%', width: '50px', height: '50px', backgroundColor: '#000', color: '#fff', border: 'none', fontSize: '20px', cursor: 'pointer', zIndex: 1000 }}>
+          ↑
+        </button>
+      )}
     </div>
   );
 }
